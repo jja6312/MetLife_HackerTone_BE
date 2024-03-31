@@ -1,0 +1,77 @@
+trigger:
+- main
+
+pr:
+- '*'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  javaVersion: '17'
+  appName: 'app-metlife-team06'
+  resourceGroupName: 'rg-metlife-team06'
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - checkout: self
+          - task: JavaToolInstaller@0
+            inputs:
+              versionSpec: '17'
+              jdkArchitectureOption: 'x64'
+              jdkSourceOption: 'PreInstalled'
+          - script: |
+              chmod +x gradlew
+              ./gradlew build -x test
+            displayName: 'Build with Gradle'
+          - task: CopyFiles@2
+            inputs:
+              SourceFolder: 'build/libs'
+              Contents: '**/*.jar'
+              TargetFolder: '$(Build.ArtifactStagingDirectory)'
+            displayName: 'Copy JAR files to the Artifact Staging Directory'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'drop'
+              publishLocation: 'Container'
+            displayName: 'Publish Build Artifacts'
+
+  - stage: Deploy
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployJob
+        environment: 
+          name: $(appName)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: drop
+                - task: AzureRmWebAppDeployment@4
+                  inputs:
+                    ConnectionType: 'AzureRM'
+                    azureSubscription: 'metlife-it-hackathon(c78a7e0d-77b8-4816-b9f7-ac6d97d997be)'
+                    appType: 'webApp'
+                    WebAppName: $(appName)
+                    ResourceGroupName: $(resourceGroupName)
+                    Package: $(Pipeline.Workspace)/drop/core-0.0.1-SNAPSHOT.jar
+                - task: AzureAppServiceSettings@1
+                  inputs:
+                    azureSubscription: 'metlife-it-hackathon(c78a7e0d-77b8-4816-b9f7-ac6d97d997be)'
+                    appName: $(appName)
+                    resourceGroupName: $(resourceGroupName)
+                    appSettings: |
+                      [
+                        {
+                          "name": "SPRING_PROFILES_ACTIVE",
+                          "value": "prod",
+                          "slotSetting": false
+                        }
+                      ]
+
